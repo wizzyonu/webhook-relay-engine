@@ -1,0 +1,15 @@
+cat << 'EOF' > .gitignore
+# --- OS & Editor ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Backend (Go) ---
+webhook-relay/bin/
+webhook-relay/vendor/
+webhook-relay/*.tests
+webhook-relay/coverage.out
+webhook-relay/.env
+webhook-relay/.env.local

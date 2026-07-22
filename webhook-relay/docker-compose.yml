@@ -1,0 +1,42 @@
+# docker-compose.yml
+version: '3.9'
+
+services:
+  # --- PostgreSQL (ACID Event Store) ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: relay_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: elite_relay
+      POSTGRES_PASSWORD: Enuguonu20
+      POSTGRES_DB: webhook_relay
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elite_relay -d webhook_relay"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Redis (Cache, Locks, & Retry Queues) ---
+  redis:
+    image: redis:7-alpine
+    container_name: relay_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass secure_redis_pass
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "secure_redis_pass", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
