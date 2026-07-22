@@ -1,15 +1,37 @@
-cat << 'EOF' > .gitignore
 # --- OS & Editor ---
 .DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# --- Backend (Go) ---
+# --- Backend (Go) - webhook-relay/ ---
 webhook-relay/bin/
 webhook-relay/vendor/
-webhook-relay/*.tests
+webhook-relay/*.test
 webhook-relay/coverage.out
 webhook-relay/.env
 webhook-relay/.env.local
+
+# --- Frontend (Node/React) - for when you start ---
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/*.log
+frontend/.env
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
+
+# --- Shared / Secrets ---
+*.pem
+*.key
+*.p12
+.env
+.env.local
+
+# --- Build Artifacts ---
+*.exe
+*.dll
+*.so
+*.dylib
