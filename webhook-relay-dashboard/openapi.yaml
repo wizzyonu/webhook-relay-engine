@@ -1,0 +1,237 @@
+openapi: 3.1.0
+info:
+  title: Elite Webhook Relay Management API
+  description: >
+    Contract for the Idempotent Webhook Relay & Replay Engine. 
+    Defines the boundary between the Frontend Dashboard (CSR) and the Backend Dispatch Engine.
+  version: 1.0.0
+  contact:
+    name: Elite Engineering Team
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local Prism Mock / Dev Server
+  - url: https://api.relay.internal/v1
+    description: Production Gateway
+
+tags:
+  - name: Ingestion
+    description: Inbound webhook reception from 3rd parties.
+  - name: Management
+    description: Dashboard APIs for monitoring, querying, and replaying events.
+
+paths:
+  /webhooks/ingest:
+    post:
+      tags: [Ingestion]
+      summary: Ingest a new webhook event
+      description: Receives the raw payload, generates an idempotency key, and queues for dispatch.
+      operationId: ingestWebhook
+      parameters:
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Cryptographic signature from the provider to verify payload integrity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true # Webhook payloads are dynamic/arbitrary
+      responses:
+        '202':
+          description: Accepted and queued for asynchronous dispatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionResponse'
+        '400':
+          description: Invalid signature or malformed JSON.
+        '401':
+          description: Unauthorized (Invalid signature).
+
+  /webhooks/events:
+    get:
+      tags: [Management]
+      summary: List webhook events (Cursor Paginated)
+      description: >
+        Retrieves a paginated list of events. Uses cursor-based pagination to support 
+        the frontend's virtualized data grid rendering 100k+ rows without offset performance hits.
+      operationId: listEvents
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque cursor for the next page.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventStatus'
+          description: Filter by FSM state.
+      responses:
+        '200':
+          description: A paginated list of events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEventResponse'
+
+  /webhooks/events/{eventId}:
+    get:
+      tags: [Management]
+      summary: Get event details
+      description: Fetches the full event, including raw payload, headers, and all delivery attempts.
+      operationId: getEvent
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Event details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookEvent'
+        '404':
+          description: Event not found.
+
+  /webhooks/events/{eventId}/replay:
+    post:
+      tags: [Management]
+      summary: Replay a failed event
+      description: >
+        Transitions a DEAD_LETTER or FAILED event back to the QUEUED state. 
+        Returns 202 Accepted to allow the frontend to optimistically update the FSM state.
+      operationId: replayEvent
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '202':
+          description: Replay accepted and queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookEvent'
+        '409':
+          description: Conflict - Event is currently in DISPATCHING state and cannot be replayed.
+
+components:
+  schemas:
+    # --- Core Domain Entities ---
+    
+    EventStatus:
+      type: string
+      description: Strict Finite State Machine (FSM) states for the webhook lifecycle.
+      enum:
+        - INGESTED
+        - QUEUED
+        - DISPATCHING
+        - SUCCESS
+        - FAILED
+        - DEAD_LETTER
+
+    WebhookEvent:
+      type: object
+      required: [id, status, target_url, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          format: uuid
+          description: The key injected into the downstream request to guarantee exactly-once processing.
+        target_url:
+          type: string
+          format: uri
+        status:
+          $ref: '#/components/schemas/EventStatus'
+        trace_id:
+          type: string
+          description: OpenTelemetry trace ID for full-stack observability.
+        payload:
+          type: object
+          additionalProperties: true
+          description: The original raw JSON payload.
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        delivery_attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryAttempt'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DeliveryAttempt:
+      type: object
+      required: [attempt_number, status_code, duration_ms, timestamp]
+      properties:
+        attempt_number:
+          type: integer
+        status_code:
+          type: integer
+          nullable: true # Null if the request timed out or network failed
+        error_message:
+          type: string
+          nullable: true
+        duration_ms:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    # --- API Response Wrappers ---
+
+    IngestionResponse:
+      type: object
+      required: [event_id, idempotency_key, status]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        idempotency_key:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/EventStatus'
+
+    PaginatedEventResponse:
+      type: object
+      required: [items, next_cursor, has_more]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEvent'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next page. Null if no more pages.
+        has_more:
+          type: boolean

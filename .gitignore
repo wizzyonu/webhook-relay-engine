@@ -15,13 +15,13 @@ webhook-relay/.env
 webhook-relay/.env.local
 
 # --- Frontend (Node/React) - for when you start ---
-frontend/node_modules/
-frontend/dist/
-frontend/build/
-frontend/*.log
-frontend/.env
-frontend/.env.local
-frontend/tsconfig.tsbuildinfo
+webhook-relay-dashboard/node_modules/
+webhook-relay-dashboard/dist/
+webhook-relay-dashboard/build/
+webhook-relay-dashboard/*.log
+webhook-relay-dashboard/.env
+webhook-relay-dashboard/.env.mock
+webhook-relay-dashboard/tsconfig.tsbuildinfo
 
 # --- Shared / Secrets ---
 *.pem
