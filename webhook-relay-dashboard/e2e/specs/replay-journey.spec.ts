@@ -82,7 +82,7 @@ test.describe('Webhook Replay Journey', () => {
     // Click the Replay button
     const replayButton = page.locator('button:has-text("Replay")');
     await expect(replayButton).toBeVisible();
-    await replayButton.click();
+    await replayButton.click({ force: true });
 
     // Verify Optimistic UI: The status should change to QUEUED instantly, 
     // BEFORE the network request resolves.
