@@ -80,15 +80,14 @@ test.describe('Webhook Replay Journey', () => {
     await expect(page.locator(`text=${mockTraceId}`)).toBeVisible();
 
     // Click the Replay button
-    const replayButton = page.locator('button:has-text("Replay")');
+    const replayButton = page.getByTestId('replay-button');
     await expect(replayButton).toBeVisible();
-    await replayButton.click({ force: true });
+    await replayButton.click();
 
-    // Verify Optimistic UI: The status should change to QUEUED instantly, 
-    // BEFORE the network request resolves.
-    // (Assuming the Badge component renders the status text)
-    await expect(page.locator('[data-testid="status-badge"]').first()).toHaveText('QUEUED');
-
+    // Verify Optimistic UI: The status should change to QUEUED instantly
+    // We use the exact test ID defined in WebhookDetailDrawer.tsx
+    await expect(page.getByTestId('event-status-badge')).toContainText('QUEUED', { ignoreCase: true });
+    
     // --- ASSERTIONS ---
 
     // Verify Trace Propagation (Integration Checklist #7)

@@ -35,3 +35,9 @@ webhook-relay-dashboard/tsconfig.tsbuildinfo
 *.dll
 *.so
 *.dylib
+
+# --- Playwright E2E artifacts ---
+webhook-relay-dashboard/test-results/
+webhook-relay-dashboard/playwright-report/
+webhook-relay-dashboard/blob-report/
+webhook-relay-dashboard/playwright/.cache/
