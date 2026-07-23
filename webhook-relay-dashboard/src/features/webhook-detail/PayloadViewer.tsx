@@ -3,26 +3,23 @@ import { useEffect } from 'react';
 import { useJsonWorker } from '@/hooks/use-worker';
 import { Skeleton } from '@/components/ui/Skeleton';
 
-// ✅ FIX: Allow undefined and null to match the generated OpenAPI types
 interface PayloadViewerProps {
-  rawPayload?: object | string | null; 
+  rawPayload?: object | string | null;
 }
 
 export function PayloadViewer({ rawPayload }: PayloadViewerProps) {
   const { processJson, tokens, error, isProcessing } = useJsonWorker();
 
   useEffect(() => {
-    // ✅ FIX: Guard against undefined/null payloads to prevent worker errors
     if (!rawPayload) return;
 
     const payloadString = typeof rawPayload === 'string' 
       ? rawPayload 
-      : JSON.stringify(rawPayload);
+      : JSON.stringify(rawPayload, null, 2);
       
     processJson(payloadString);
-  }, [rawPayload, processJson]);
+  }, [rawPayload, processJson]); // processJson is now stable, preventing the loop
 
-  // ✅ FIX: Render an Apple-style empty state if the payload is missing
   if (!rawPayload) {
     return (
       <div className="p-6 text-[14px] text-ink-muted-48 font-text bg-canvas-parchment rounded-lg border border-hairline text-center">
@@ -37,7 +34,6 @@ export function PayloadViewer({ rawPayload }: PayloadViewerProps) {
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-5/6" />
         <Skeleton className="h-4 w-4/6" />
-        <Skeleton className="h-4 w-3/6" />
       </div>
     );
   }

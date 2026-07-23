@@ -1,10 +1,6 @@
 // src/hooks/use-worker.ts
-import { useEffect, useRef, useState } from 'react';
-
-// ✅ FIX 1: Import the TYPE directly from the source file (NO ?worker suffix)
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JsonToken } from '@/workers/json-parser.worker';
-
-// ✅ FIX 2: Import the WORKER CONSTRUCTOR using Vite's ?worker suffix
 import JsonParserWorker from '@/workers/json-parser.worker?worker';
 
 export function useJsonWorker() {
@@ -14,7 +10,6 @@ export function useJsonWorker() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
-    // ✅ FIX 3: Instantiate using the imported constructor (Cleaner & fully typed)
     workerRef.current = new JsonParserWorker();
 
     workerRef.current.onmessage = (e: MessageEvent) => {
@@ -27,19 +22,26 @@ export function useJsonWorker() {
       }
     };
 
-    // EXPLICIT CLEANUP: Prevent memory leaks / detached workers
+    workerRef.current.onerror = (err) => {
+      console.error('Worker error:', err);
+      setIsProcessing(false);
+      setError('Worker failed to process payload');
+    };
+
     return () => {
       workerRef.current?.terminate();
       workerRef.current = null;
     };
   }, []);
 
-  const processJson = (rawJson: string) => {
+  // ✅ FIX: Wrap in useCallback with empty dependencies. 
+  // It only relies on workerRef.current, which is stable.
+  const processJson = useCallback((rawJson: string) => {
     setIsProcessing(true);
     setTokens(null);
     setError(null);
     workerRef.current?.postMessage(rawJson);
-  };
+  }, []);
 
   return { processJson, tokens, error, isProcessing };
 }
