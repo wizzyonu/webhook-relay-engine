@@ -1,0 +1,108 @@
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------
+  # DATABASE: PostgreSQL
+  # ---------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: webhook-db
+    environment:
+      POSTGRES_USER: elite_relay
+      POSTGRES_PASSWORD: Enuguonu20
+      POSTGRES_DB: webhook_relay
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elite_relay -d webhook_relay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # ---------------------------------------------------------
+  # CACHE & QUEUE: Redis
+  # ---------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: webhook-redis
+    command: redis-server --requirepass secure_redis_pass --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "secure_redis_pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ---------------------------------------------------------
+  # BACKEND: Go API + Worker
+  # ---------------------------------------------------------
+  backend:
+    build:
+      context: ./webhook-relay
+      dockerfile: Dockerfile
+    container_name: webhook-backend
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgres://elite_relay:Enuguonu20@postgres:5432/webhook_relay?sslmode=disable
+      - REDIS_URL=redis://:secure_redis_pass@redis:6379/0
+      - WEBHOOK_SIGNING_SECRET=UX2mIQWtej46BIE4EYv/Z2ymoQbcO9hCu85sBh8/y7Y=
+      - API_AUTH_TOKEN=dev-e2e-test-token-123
+      - GIN_MODE=release
+    ports:
+      - "3000:3000"
+    networks:
+      - webhook-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # ---------------------------------------------------------
+  # FRONTEND: React/Vite + Nginx
+  # ---------------------------------------------------------
+  frontend:
+    build:
+      context: ./webhook-relay-dashboard
+      dockerfile: Dockerfile
+    container_name: webhook-frontend
+    ports:
+      - "80:80"
+    networks:
+      - webhook-net
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  webhook-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
