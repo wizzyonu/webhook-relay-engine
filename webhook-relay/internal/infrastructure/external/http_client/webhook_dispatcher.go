@@ -17,9 +17,7 @@ type HTTPDispatcher struct {
 
 func NewHTTPDispatcher() ports.Dispatcher {
 	return &HTTPDispatcher{
-		client: &http.Client{
-			Timeout: 10 * time.Second, // Strict timeout to prevent worker thread exhaustion
-		},
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -29,36 +27,42 @@ func (d *HTTPDispatcher) Dispatch(ctx context.Context, event *entities.WebhookEv
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 1. Inject Strict Contract Headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Trace-Id", event.TraceID)
+	// PRD FR5: Inject Idempotency Key & Trace ID
 	req.Header.Set("X-Relay-Idempotency-Key", event.IdempotencyKey)
+	req.Header.Set("X-Trace-Id", event.TraceID)
 	
-	// Re-inject original headers if necessary (excluding host/content-length)
+	// Inject any custom headers from the original ingestion
 	for k, v := range event.Headers {
-		if k != "Content-Length" && k != "Host" {
-			req.Header.Set(k, v)
-		}
+		req.Header.Set(k, v)
 	}
 
-	// 2. Execute and Measure
 	start := time.Now()
 	resp, err := d.client.Do(req)
-	duration := time.Since(start).Milliseconds()
+	duration := time.Since(start)
 
+	attemptNumber := event.AttemptCount + 1
 	attempt := &entities.DeliveryAttempt{
-		EventID:    event.ID,
-		DurationMs: int(duration),
-		Timestamp:  time.Now(),
+		EventID:       event.ID,
+		AttemptNumber: attemptNumber,
+		DurationMs:    duration.Milliseconds(), // FIX: Milliseconds() returns int64
+		Timestamp:     time.Now(),
 	}
 
 	if err != nil {
 		errMsg := err.Error()
 		attempt.ErrorMessage = &errMsg
-		return attempt, err // Network failure or timeout
+		return attempt, fmt.Errorf("http request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	attempt.StatusCode = &resp.StatusCode
+	attempt.StatusCode = resp.StatusCode // FIX: Assign int directly, no pointer
+
+	if resp.StatusCode >= 400 {
+		errMsg := fmt.Sprintf("HTTP %d", resp.StatusCode)
+		attempt.ErrorMessage = &errMsg
+		return attempt, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
 	return attempt, nil
 }

@@ -1,6 +1,5 @@
 // src/features/documentation/DocumentationModal.tsx
 import { useEffect, useRef, useState } from 'react';
-import type { components } from '@/api/generated/schema';
 
 interface DocumentationModalProps {
   isOpen: boolean;
@@ -12,7 +11,6 @@ type DocTab = 'overview' | 'endpoints' | 'schemas' | 'examples';
 export function DocumentationModal({ isOpen, onClose }: DocumentationModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [activeTab, setActiveTab] = useState<DocTab>('overview');
-  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const dialog = dialogRef.current;

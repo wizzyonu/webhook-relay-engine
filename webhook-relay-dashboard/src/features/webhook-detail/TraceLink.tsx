@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { OBSERVABILITY_URL } from '@/lib/constants';
 
 interface TraceLinkProps {
-  traceId?: string;
+  traceId?: string | undefined;
 }
 
 export function TraceLink({ traceId }: TraceLinkProps) {

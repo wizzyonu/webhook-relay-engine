@@ -15,9 +15,9 @@ type IngestWebhookInput struct {
 }
 
 type IngestWebhookOutput struct {
-	EventID        string
-	IdempotencyKey string
-	Status         entities.EventStatus
+	EventID        string               `json:"event_id"`
+	IdempotencyKey string               `json:"idempotency_key"`
+	Status         entities.EventStatus `json:"status"`
 }
 
 type IngestWebhookUseCase interface {

@@ -4,7 +4,7 @@ import { useJsonWorker } from '@/hooks/use-worker';
 import { Skeleton } from '@/components/ui/Skeleton';
 
 interface PayloadViewerProps {
-  rawPayload?: object | string | null;
+  rawPayload?: object | string | null | undefined;
 }
 
 export function PayloadViewer({ rawPayload }: PayloadViewerProps) {
@@ -49,7 +49,7 @@ export function PayloadViewer({ rawPayload }: PayloadViewerProps) {
   if (!tokens) return null;
 
   return (
-    <pre className="p-6 text-[13px] font-mono overflow-x-auto bg-canvas-parchment rounded-lg border border-hairline leading-relaxed max-h-[60vh]">
+    <pre data-testid="payload-viewer" className="p-6 text-[13px] font-mono overflow-x-auto bg-canvas-parchment rounded-lg border border-hairline leading-relaxed max-h-[60vh]">
       <code>
         {tokens.map((token, i) => {
           let colorClass = 'text-ink';

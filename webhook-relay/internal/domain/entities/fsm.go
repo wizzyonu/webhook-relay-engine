@@ -2,44 +2,34 @@ package entities
 
 import (
 	"errors"
-	"time" // <--- ADD THIS IMPORT
+	"fmt"
+	"time"
 )
 
-var (
-	ErrInvalidTransition = errors.New("invalid state transition")
-	ErrTerminalState     = errors.New("event is in a terminal state and cannot be modified")
-)
+var ErrInvalidTransition = errors.New("invalid state transition")
 
-// validTransitions defines the strict rules of our FSM.
-var validTransitions = map[EventStatus][]EventStatus{
-	StatusIngested:    {StatusQueued},
-	StatusQueued:      {StatusDispatching},
-	StatusDispatching: {StatusSuccess, StatusFailed},
-	StatusFailed:      {StatusQueued, StatusDeadLetter}, // Replay moves it back to QUEUED
-	StatusSuccess:     {},                               // Terminal
-	StatusDeadLetter:  {},                               // Terminal
-}
-
-// CanTransitionTo enforces the FSM rules.
-func (current EventStatus) CanTransitionTo(next EventStatus) bool {
-	allowedStates, exists := validTransitions[current]
-	if !exists {
-		return false
+func (e *WebhookEvent) TransitionTo(newStatus EventStatus) error {
+	validTransitions := map[EventStatus][]EventStatus{
+		StatusIngested:    {StatusQueued, StatusFailed},
+		StatusQueued:      {StatusDispatching, StatusFailed},
+		// ELITE FIX: Allow DISPATCHING to transition to QUEUED (for retries), SUCCESS, FAILED, or DEAD_LETTER.
+		StatusDispatching: {StatusSuccess, StatusQueued, StatusFailed, StatusDeadLetter},
+		StatusFailed:      {StatusQueued},      // Allows FR10: Replay
+		StatusDeadLetter:  {StatusQueued},      // Allows FR10: Replay
 	}
-	for _, state := range allowedStates {
-		if state == next {
-			return true
+
+	allowed, exists := validTransitions[e.Status]
+	if !exists {
+		return fmt.Errorf("%w: invalid current state: %s", ErrInvalidTransition, e.Status)
+	}
+
+	for _, state := range allowed {
+		if state == newStatus {
+			e.Status = newStatus
+			e.UpdatedAt = time.Now()
+			return nil
 		}
 	}
-	return false
-}
 
-// Transition attempts to change the state, returning an error if the FSM forbids it.
-func (e *WebhookEvent) TransitionTo(newStatus EventStatus) error {
-	if !e.Status.CanTransitionTo(newStatus) {
-		return ErrInvalidTransition
-	}
-	e.Status = newStatus
-	e.UpdatedAt = time.Now()
-	return nil
+	return fmt.Errorf("%w: from %s to %s", ErrInvalidTransition, e.Status, newStatus)
 }

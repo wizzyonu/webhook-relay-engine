@@ -5,31 +5,31 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
 )
 
-var ErrInvalidSignature = errors.New("invalid webhook signature")
-
-// VerifyHMACSHA256 verifies the signature of a payload.
-// Expected header format: "sha256=<hex_digest>"
+// VerifyHMACSHA256 validates the inbound webhook signature using constant-time comparison.
 func VerifyHMACSHA256(payload []byte, signatureHeader string, secret string) error {
-	if !strings.HasPrefix(signatureHeader, "sha256=") {
-		return ErrInvalidSignature
+	// 1. Enforce the "sha256=" prefix format
+	parts := strings.SplitN(signatureHeader, "=", 2)
+	if len(parts) != 2 || parts[0] != "sha256" {
+		return errors.New("invalid signature format: must be sha256=<hex>")
 	}
 
-	expectedSig := strings.TrimPrefix(signatureHeader, "sha256=")
-	expectedBytes, err := hex.DecodeString(expectedSig)
+	// 2. Decode the received hex signature
+	receivedSig, err := hex.DecodeString(parts[1])
 	if err != nil {
-		return fmt.Errorf("failed to decode signature hex: %w", err)
+		return errors.New("invalid signature hex encoding")
 	}
 
+	// 3. Compute the expected HMAC on the RAW payload bytes
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(payload)
-	computedBytes := mac.Sum(nil)
+	expectedSig := mac.Sum(nil)
 
-	if !hmac.Equal(computedBytes, expectedBytes) {
-		return ErrInvalidSignature
+	// 4. Constant-time comparison to prevent timing attacks
+	if !hmac.Equal(receivedSig, expectedSig) {
+		return errors.New("invalid webhook signature")
 	}
 
 	return nil

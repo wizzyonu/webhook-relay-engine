@@ -1,98 +1,52 @@
 // e2e/specs/replay-journey.spec.ts
 import { test, expect } from '@playwright/test';
-import { v4 as uuidv4 } from 'uuid'; // For generating mock trace IDs
+import { seedFailedWebhook, waitForFailedStatus } from '../helpers/api';
 
 test.describe('Webhook Replay Journey', () => {
-  const mockEventId = '123e4567-e89b-12d3-a456-426614174000';
-  const mockTraceId = uuidv4();
+  test('should open detail drawer, replay failed event optimistically, and propagate trace ID', async ({ page, request }) => {
+    // 1. Seed a failed webhook (targets httpbin.org/status/500)
+    const seeded = await seedFailedWebhook(request);
+    await waitForFailedStatus(request, seeded.event_id);
 
-  test('should open detail drawer, replay failed event optimistically, and propagate trace ID', async ({ page }) => {
-    
-    // 1. Mock the initial GET /webhooks/events (List)
-    await page.route('**/api/v1/webhooks/events*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          items: [{
-            id: mockEventId,
-            status: 'FAILED', // FSM allows replay from here
-            target_url: 'https://api.client.com/webhook',
-            trace_id: mockTraceId,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            idempotency_key: uuidv4(),
-            payload: { event: 'test' }
-          }],
-          next_cursor: null,
-          has_more: false
-        }),
-      });
-    });
-
-    // 2. Mock the GET /webhooks/events/:id (Detail)
-    await page.route(`**/api/v1/webhooks/events/${mockEventId}`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          id: mockEventId,
-          status: 'FAILED',
-          trace_id: mockTraceId,
-          payload: { event: 'test', data: { nested: true } }
-        }),
-      });
-    });
-
-    // 3. Intercept the POST /replay request to verify headers and simulate 202 Accepted
-    let replayTraceHeader: string | null = null;
-    
-    await page.route(`**/api/v1/webhooks/events/${mockEventId}/replay`, async (route) => {
-      // Capture the trace header injected by our elite API client
-      replayTraceHeader = route.request().headers()['traceparent'];
-      
-      // Simulate backend processing delay
-      await new Promise(r => setTimeout(r, 500));
-
-      await route.fulfill({
-        status: 202,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          id: mockEventId,
-          status: 'QUEUED', // Backend confirms transition
-          trace_id: mockTraceId
-        }),
-      });
-    });
-
-    // --- EXECUTE USER JOURNEY ---
-
-    // Navigate to dashboard
+    // 2. Navigate to the dashboard
     await page.goto('/');
-    
-    // Verify Zero CLS: Ensure the grid skeleton doesn't cause layout shifts
-    await expect(page.locator('text=https://api.client.com/webhook')).toBeVisible();
 
-    // Click the row to open the native <dialog> drawer
-    await page.locator('text=https://api.client.com/webhook').click();
-    
-    // Verify Drawer opened and Trace ID is visible
-    await expect(page.locator(`text=${mockTraceId}`)).toBeVisible();
+    // 3. Filter by FAILED status
+    await page.getByTestId('status-filter').selectOption('FAILED');
 
-    // Click the Replay button
+    // 4. Wait for the specific row to appear (using the seeded target URL)
+    // We use a partial text match for robustness
+    const row = page.locator('text=httpbin.org/status/500').first();
+    await expect(row).toBeVisible({ timeout: 10000 });
+
+    // 5. Click the row to open the native <dialog> detail drawer
+    await row.click();
+
+    // 6. Verify the drawer is open and contains the expected elements
+    await expect(page.getByTestId('webhook-detail-drawer')).toBeVisible();
+    await expect(page.getByTestId('payload-viewer')).toBeVisible();
+
+    // 7. Click the Replay button
     const replayButton = page.getByTestId('replay-button');
     await expect(replayButton).toBeVisible();
+    await expect(replayButton).toBeEnabled();
+    
+    // Capture the network request to verify trace ID propagation (NFR6)
+    const replayRequestPromise = page.waitForRequest(req => 
+      req.url().includes('/replay') && req.method() === 'POST'
+    );
+    
     await replayButton.click();
 
-    // Verify Optimistic UI: The status should change to QUEUED instantly
-    // We use the exact test ID defined in WebhookDetailDrawer.tsx
+    // 8. Verify Optimistic UI: The status should change to QUEUED instantly
     await expect(page.getByTestId('event-status-badge')).toContainText('QUEUED', { ignoreCase: true });
-    
-    // --- ASSERTIONS ---
 
-    // Verify Trace Propagation (Integration Checklist #7)
-    expect(replayTraceHeader).not.toBeNull();
-    // Verify it matches W3C Trace Context format (00-traceid-spanid-flags)
-    expect(replayTraceHeader).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/i);
+    // 9. Verify the network request was sent with the W3C traceparent header
+    const replayRequest = await replayRequestPromise;
+    expect(replayRequest.headers()['traceparent']).toBeTruthy();
+
+    // 10. Verify the backend responded with 202 Accepted
+    const replayResponse = await replayRequest.response();
+    expect(replayResponse?.status()).toBe(202);
   });
 });

@@ -1,12 +1,7 @@
 package entities
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
-// EventStatus represents the strict Finite State Machine (FSM) states.
-// Mapped directly to the OpenAPI contract.
 type EventStatus string
 
 const (
@@ -18,30 +13,33 @@ const (
 	StatusDeadLetter  EventStatus = "DEAD_LETTER"
 )
 
-// WebhookEvent is the core aggregate root.
-// Notice: ZERO imports from Gin, Postgres, Redis, or UUID libraries.
-type WebhookEvent struct {
-	ID             string
-	IdempotencyKey string
-	TargetURL      string
-	Status         EventStatus
-	TraceID        string
-	
-	// RawMessage preserves the exact bytes for signature verification and replay
-	Payload        json.RawMessage 
-	Headers        map[string]string
-	
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+// DeliveryAttempt represents a single dispatch attempt (PRD FR9)
+type DeliveryAttempt struct {
+	ID            string
+	EventID       string
+	AttemptNumber int
+	StatusCode    int
+	ErrorMessage  *string // Pointer to allow null on success
+	DurationMs    int64
+	Timestamp     time.Time
 }
 
-// DeliveryAttempt records the outcome of a single dispatch attempt.
-type DeliveryAttempt struct {
-	ID           string
-	EventID      string
-	AttemptNumber int
-	StatusCode   *int // Pointer to allow NULL (e.g., network timeout)
-	ErrorMessage *string
-	DurationMs   int
-	Timestamp    time.Time
+type WebhookEvent struct {
+	ID               string
+	IdempotencyKey   string
+	TargetURL        string
+	Status           EventStatus
+	TraceID          string
+	Payload          []byte
+	Headers          map[string]string
+	AttemptCount     int
+	DeliveryAttempts []DeliveryAttempt
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// AddDeliveryAttempt safely appends an attempt and updates the counter
+func (e *WebhookEvent) AddDeliveryAttempt(attempt DeliveryAttempt) {
+	e.DeliveryAttempts = append(e.DeliveryAttempts, attempt)
+	e.AttemptCount = attempt.AttemptNumber
 }

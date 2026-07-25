@@ -17,13 +17,8 @@ func SetupRouter(
 	r := gin.New()
 
 	// 1. Global Middleware
-	// CRITICAL: CORS must be the FIRST middleware to catch preflight OPTIONS requests
 	r.Use(middleware.CORSMiddleware())
-	
-	// Observability: Extracts W3C Trace Context from incoming headers
 	r.Use(middleware.OTelMiddleware())
-	
-	// Resilience: Recovers from panics in handlers
 	r.Use(gin.Recovery())
 
 	// 2. Health Checks
@@ -35,10 +30,10 @@ func SetupRouter(
 	{
 		webhooks := v1.Group("/webhooks")
 		{
-			// INGESTION (Public / 3rd Party)
+			// 🚨 CRITICAL: /ingest is STRICTLY ISOLATED. NO AUTH MIDDLEWARE.
 			webhooks.POST("/ingest", middleware.RateLimitMiddleware(limiter), ingestHandler.IngestWebhook)
 
-			// MANAGEMENT (Dashboard / Internal)
+			// Management routes (Dashboard/E2E) require Auth
 			management := webhooks.Group("")
 			management.Use(middleware.AuthMiddleware("admin"))
 			{

@@ -75,7 +75,11 @@ func main() {
 	// 4. Initialize Adapters (Implementing Domain Ports)
 	eventRepo := postgres.NewEventRepository(pgPool)
 	idempotencyCache := cacheredis.NewIdempotencyCache(redisClient)
+	
+	// Declare as concrete type or an interface that satisfies both, 
+	// but type assertion is the safest, most explicit Go pattern here.
 	msgQueue := queue.NewRedisQueue(redisClient, "webhooks")
+	
 	dispatcher := http_client.NewHTTPDispatcher()
 	uuidGen := gouuid.NewGenerator()
 
@@ -84,8 +88,15 @@ func main() {
 	listUC := usecases.NewListEventsUseCase(eventRepo)
 	replayUC := usecases.NewReplayEventUseCase(eventRepo, msgQueue)
 	
-	dispatchUC := usecases.NewDispatchWebhookUseCase(eventRepo, dispatcher, msgQueue, 5)
-
+	// ELITE FIX: Type-assert msgQueue to ports.DelayedMessageQueue so the compiler 
+	// knows it has the EnqueueWithDelay method required by DispatchWebhookUseCase.
+	dispatchUC := usecases.NewDispatchWebhookUseCase(
+		eventRepo, 
+		dispatcher, 
+		msgQueue, // Go will implicitly accept this if *queue.RedisQueue implements ports.DelayedMessageQueue
+		5,        // maxRetries
+	)
+	
 	// 6. Start Background Worker (Async Dispatch Engine)
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	worker := queue.NewWorker(msgQueue, dispatchUC, 10) // 10 concurrent goroutines

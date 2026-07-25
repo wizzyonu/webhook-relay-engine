@@ -2,9 +2,9 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"time"
 
-	"github.com/elite-engineering/webhook-relay/internal/domain/ports"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -13,30 +13,42 @@ type RedisQueue struct {
 	key    string
 }
 
-func NewRedisQueue(client *redis.Client, key string) ports.MessageQueue {
+func NewRedisQueue(client *redis.Client, key string) *RedisQueue {
 	return &RedisQueue{client: client, key: key}
 }
 
-// Enqueue adds an event to the immediate processing queue.
+// Enqueue pushes an event ID to the standard processing queue.
 func (q *RedisQueue) Enqueue(ctx context.Context, eventID string) error {
-	return q.client.LPush(ctx, q.key+":immediate", eventID).Err()
+	return q.client.LPush(ctx, q.key, eventID).Err()
 }
 
-// Dequeue blocks until an item is available or context is cancelled.
+// Dequeue blocks and waits for an event ID from the standard queue.
 func (q *RedisQueue) Dequeue(ctx context.Context) (string, error) {
-	result, err := q.client.BRPop(ctx, 5*time.Second, q.key+":immediate").Result()
+	// BRPop blocks until an element is available or context is cancelled
+	result, err := q.client.BRPop(ctx, 5*time.Second, q.key).Result()
 	if err == redis.Nil {
-		return "", nil // Timeout, no items
+		return "", nil // Timeout, no events
 	}
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to dequeue: %w", err)
 	}
-	return result[1], nil // BRPop returns [key, value]
+	
+	// BRPop returns [key, value], we want the value
+	if len(result) < 2 {
+		return "", fmt.Errorf("unexpected BRPop result format")
+	}
+	return result[1], nil
 }
 
-// EnqueueWithDelay satisfies the ports.DelayedMessageQueue interface.
-// Note: For hackathon demo purposes, this enqueues immediately. 
-// Production implementation would use Redis ZSET (ZAdd) + BZPOPMIN sweeper.
+// EnqueueWithDelay schedules an event for retry using a Redis Sorted Set (ZSET).
+// The score is the Unix timestamp when the event should become available.
 func (q *RedisQueue) EnqueueWithDelay(ctx context.Context, eventID string, delay time.Duration) error {
-	return q.client.LPush(ctx, q.key+":immediate", eventID).Err()
+	delayedKey := q.key + ":delayed"
+	score := float64(time.Now().Add(delay).Unix())
+	
+	// ZAdd adds the eventID with the future timestamp as the score
+	return q.client.ZAdd(ctx, delayedKey, redis.Z{
+		Score:  score,
+		Member: eventID,
+	}).Err()
 }

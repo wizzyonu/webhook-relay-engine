@@ -58,7 +58,7 @@ export function ReplayButton({ eventId, status, onReplaySuccess }: ReplayButtonP
       return { previousEvent };
     },
     // Rollback on error
-    onError: (err, variables, context) => {
+    onError: (err, _variables, context) => {
       if (context?.previousEvent) {
         queryClient.setQueryData(
           queryKeys.webhooks.detail(eventId),
@@ -71,7 +71,7 @@ export function ReplayButton({ eventId, status, onReplaySuccess }: ReplayButtonP
     // Refetch after mutation completes
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.webhooks.detail(eventId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.webhooks.list() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.webhooks.all });
       onReplaySuccess?.();
     },
   });

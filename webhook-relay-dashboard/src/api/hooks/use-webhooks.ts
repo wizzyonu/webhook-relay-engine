@@ -9,12 +9,16 @@ type PaginatedResponse = components['schemas']['PaginatedEventResponse'];
 type WebhookEvent = components['schemas']['WebhookEvent'];
 
 // Cursor-based infinite scroll for the virtualized grid
-export function useWebhooks(limit: number = DEFAULT_PAGE_LIMIT) {
+export function useWebhooks(options?: { status?: string; limit?: number }) {
+  const limit = options?.limit ?? DEFAULT_PAGE_LIMIT;
+  const status = options?.status;
+
   return useInfiniteQuery({
-    queryKey: queryKeys.webhooks.list({ limit }),
+    queryKey: queryKeys.webhooks.list({ limit, status }),
     queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams({ limit: limit.toString() });
       if (pageParam) params.set('cursor', pageParam);
+      if (status && status !== 'ALL') params.set('status', status);
 
       return apiClient<PaginatedResponse>(`/webhooks/events?${params.toString()}`);
     },
@@ -55,7 +59,7 @@ export function useReplayWebhook() {
 
       return { previousEvents };
     },
-    onError: (err, eventId, context) => {
+    onError: (_err, _eventId, context) => {
       // Rollback to the snapshot if the backend rejects the replay
       if (context?.previousEvents) {
         for (const [queryKey, data] of context.previousEvents) {
