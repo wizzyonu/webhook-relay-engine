@@ -1,4 +1,7 @@
 # .github/workflows/ci-cd.yml
+# Elite CI/CD Pipeline for Webhook Relay System
+# Enforces quality gates, builds multi-stage Docker images, and pushes to GitHub Container Registry (GHCR).
+
 name: Webhook Relay CI/CD
 
 on:
@@ -9,64 +12,88 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
-  IMAGE_NAME_FRONTEND: ${{ github.repository }}/frontend
+  IMAGE_NAME_BACKEND: wizzyonu/webhook-relay-backend
+  IMAGE_NAME_FRONTEND: wizzyonu/webhook-relay-frontend
 
 jobs:
-  # ---------------------------------------------------------
+  # ==========================================================================
   # JOB 1: Frontend Quality Gates
-  # ---------------------------------------------------------
+  # ==========================================================================
   frontend-checks:
-    name: Frontend Checks
+    name: Frontend Quality
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./webhook-relay-dashboard
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: './webhook-relay-dashboard/package-lock.json'
-      - run: npm ci
-      - run: npm run typecheck # Ensure "typecheck": "tsc --noEmit" is in package.json
-      - run: npm run lint
-      - run: npm run build # Verify production build succeeds
 
-  # ---------------------------------------------------------
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Type Check (Strict)
+        run: npm run typecheck # Ensure "typecheck": "tsc --noEmit" exists in package.json
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build Production Bundle
+        run: npm run build
+
+  # ==========================================================================
   # JOB 2: Backend Quality Gates
-  # ---------------------------------------------------------
+  # ==========================================================================
   backend-checks:
-    name: Backend Checks
+    name: Backend Quality
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./webhook-relay
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache-dependency-path: './webhook-relay/go.sum'
-      - run: go mod download
-      - run: go vet ./...
-      - run: go build -v ./cmd/api
-      - run: go test -v -race ./...
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-  # ---------------------------------------------------------
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4' # Matches your Dockerfile
+          cache-dependency-path: './webhook-relay/go.sum'
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Vet Code (Static Analysis)
+        run: go vet ./...
+
+      - name: Build Binary
+        run: go build -v ./cmd/api
+
+      - name: Run Unit Tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+  # ==========================================================================
   # JOB 3: Build & Push Docker Images (Main branch only)
-  # ---------------------------------------------------------
+  # ==========================================================================
   build-and-push:
-    name: Build and Push Docker Images
+    name: Build & Push Docker Images
     runs-on: ubuntu-latest
     needs: [frontend-checks, backend-checks]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
-      packages: write
+      packages: write # Required for GHCR authentication
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
       
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -75,13 +102,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract Metadata (Backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v5
         with:
           context: ./webhook-relay
           file: ./webhook-relay/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:latest,${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:${{ github.sha }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract Metadata (Frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
 
       - name: Build and Push Frontend Image
         uses: docker/build-push-action@v5
@@ -89,4 +137,7 @@ jobs:
           context: ./webhook-relay-dashboard
           file: ./webhook-relay-dashboard/Dockerfile
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:latest,${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:${{ github.sha }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

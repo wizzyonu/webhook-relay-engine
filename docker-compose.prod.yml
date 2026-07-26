@@ -1,5 +1,7 @@
 # docker-compose.prod.yml
-version: '3.8'
+# Production-grade orchestration for Webhook Relay Dashboard
+# Complies with integration_skills.md §3 (Zero-Downtime & Resilience) 
+# and backend_skills.md §1 (Advanced Resiliency & Fault Tolerance)
 
 services:
   # ---------------------------------------------------------
@@ -21,11 +23,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # ---------------------------------------------------------
   # CACHE & QUEUE: Redis
@@ -33,6 +39,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: webhook-redis
+    # Enforce password and enable Append Only File (AOF) for persistence
     command: redis-server --requirepass secure_redis_pass --appendonly yes
     volumes:
       - redis_data:/data
@@ -43,14 +50,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
   # ---------------------------------------------------------
-  # BACKEND: Go API + Worker
+  # BACKEND: Go API + Background Worker
   # ---------------------------------------------------------
   backend:
     build:
@@ -59,7 +70,7 @@ services:
     container_name: webhook-backend
     environment:
       - PORT=3000
-      - DATABASE_URL=postgres://elite_relay:Enuguonu20@postgres:5432/webhook_relay?sslmode=disable
+      - DATABASE_URL=postgres://elite_relay:Enuguonu20@postgres:5433/webhook_relay?sslmode=disable
       - REDIS_URL=redis://:secure_redis_pass@redis:6379/0
       - WEBHOOK_SIGNING_SECRET=UX2mIQWtej46BIE4EYv/Z2ymoQbcO9hCu85sBh8/y7Y=
       - API_AUTH_TOKEN=dev-e2e-test-token-123
@@ -73,11 +84,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # ✅ RECTIFIED HEALTHCHECK: Forces IPv4 (127.0.0.1) to prevent Alpine wget IPv6 resolution failures
+    healthcheck:
+    # ✅ CORRECT: Uses curl with -f flag to fail on non-200 status codes
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # ---------------------------------------------------------
   # FRONTEND: React/Vite + Nginx
@@ -93,16 +115,32 @@ services:
       - webhook-net
     depends_on:
       - backend
+    # ✅ RECTIFIED HEALTHCHECK: Forces IPv4 (127.0.0.1) for consistency
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       resources:
         limits:
           cpus: '0.5'
           memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
+# ---------------------------------------------------------
+# NETWORKS & VOLUMES
+# ---------------------------------------------------------
 networks:
   webhook-net:
     driver: bridge
+    name: webhook-net
 
 volumes:
   postgres_data:
+    name: webhook_postgres_data
   redis_data:
+    name: webhook_redis_data
