@@ -1,5 +1,9 @@
 // src/api/client.ts
-import { API_BASE_URL } from '@/lib/constants';
+import { API_BASE_PATH } from '@/lib/constants';
+
+// The management token defined in the backend .env file for RBAC validation
+// Fallback to the dev-e2e token if the environment variable is not set
+const MANAGEMENT_TOKEN = import.meta.env.VITE_MANAGEMENT_TOKEN || 'dev-e2e-test-token-123';
 
 // Generate W3C Trace Context (traceparent) for OpenTelemetry
 const generateTraceParent = (): string => {
@@ -8,11 +12,32 @@ const generateTraceParent = (): string => {
   return `00-${traceId}-${spanId}-01`;
 };
 
+export interface ApiErrorDetails {
+  field?: string;
+  issue: string;
+}
+
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  traceId?: string;
+  details?: ApiErrorDetails[];
+
+  constructor(
+    message: string, 
+    status: number, 
+    options?: { traceId?: string; details?: ApiErrorDetails[] }
+  ) {
     super(message);
+    this.name = 'ApiError';
     this.status = status;
+    
+    // Elite Directive: Explicitly check for undefined to satisfy exactOptionalPropertyTypes
+    if (options?.traceId !== undefined) {
+      this.traceId = options.traceId;
+    }
+    if (options?.details !== undefined) {
+      this.details = options.details;
+    }
   }
 }
 
@@ -21,35 +46,50 @@ export async function apiClient<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const traceparent = generateTraceParent();
+  
   const headers = new Headers(options.headers);
   
-  // ✅ FIX: Inject Authorization header from environment
-  const authToken = import.meta.env.VITE_AUTH_TOKEN;
-  if (authToken) {
-    headers.set('Authorization', authToken);
-  }
-
-  // ✅ FIX: Inject Observability header
+  // ✅ CRITICAL FIX: Attach the Bearer token for RBAC validation on all requests
+  headers.set('Authorization', `Bearer ${MANAGEMENT_TOKEN}`);
   headers.set('traceparent', traceparent);
   headers.set('Content-Type', 'application/json');
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  // Relative path ensures same-origin requests, bypassing CORS preflight
+  const url = `${API_BASE_PATH}${endpoint}`;
+
+  const response = await fetch(url, {
     ...options,
     headers,
+    credentials: 'same-origin', 
   });
 
   if (!response.ok) {
-    // Parse the backend's JSON error message if available
     let errorMessage = `API Error: ${response.statusText}`;
+    let errorOptions: { traceId?: string; details?: ApiErrorDetails[] } = {};
+
+    // ✅ Parse the Universal Error Format
     try {
       const errorData = await response.json();
-      errorMessage = errorData.error || errorMessage;
+      if (errorData?.error) {
+        errorMessage = errorData.error.message || errorMessage;
+        
+        if (errorData.error.traceId) {
+          errorOptions.traceId = errorData.error.traceId;
+        }
+        
+        // Array.isArray guard ensures we never assign undefined to the details property
+        if (Array.isArray(errorData.error.details)) {
+          errorOptions.details = errorData.error.details;
+        }
+      }
     } catch {
-      // Ignore if response is not JSON
+      // Fallback to default message if response is not JSON (e.g., 502 Bad Gateway from Nginx)
     }
-    throw new ApiError(errorMessage, response.status);
+
+    throw new ApiError(errorMessage, response.status, errorOptions);
   }
 
+  // Handle 204 No Content or empty bodies
   if (response.status === 204) {
     return {} as T;
   }

@@ -1,7 +1,12 @@
 // src/lib/constants.ts
 
-/** API base URL from environment */
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+/** 
+ * API base path. 
+ * Uses a relative path to ensure same-origin requests in production, 
+ * allowing the Nginx reverse proxy to route /api/* seamlessly without CORS issues.
+ * In local dev, Vite's proxy configuration (vite.config.ts) handles routing this to localhost:3000.
+ */
+export const API_BASE_PATH = '/api/v1';
 
 /** Observability platform URL for trace deep-links */
 export const OBSERVABILITY_URL = import.meta.env.VITE_OBSERVABILITY_URL || 'https://grafana.internal/explore';
